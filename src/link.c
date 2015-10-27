@@ -661,7 +661,7 @@ void set_fanuc10s(){ // TODO
    set_hal_pin("conf0.cur_ind", 0.9);
    set_hal_pin("conf0.autophase", 0.0);
    set_hal_pin("conf0.fb_offset", 1.324);
-   set_fb_res();
+   set_fb_enc();
 }
 
 void set_sanyo_r2(){ // TODO
