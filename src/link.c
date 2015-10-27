@@ -637,6 +637,33 @@ void set_festo(){ // TODO
    set_fb_res();
 }
 
+void set_fanuc10s(){ // TODO
+   set_hal_pin("conf0.polecount", 4.0);
+   set_hal_pin("conf0.max_vel", RPM(8090));
+   set_hal_pin("conf0.max_acc", RPM(8090) / 0.01);
+   set_hal_pin("conf0.max_force", 2.8);
+   set_hal_pin("conf0.max_ac_cur", 6.4);
+
+   set_hal_pin("conf0.fb_type", RES1);
+   set_hal_pin("conf0.fb_rev", 0.0);
+   set_hal_pin("conf0.fb_res", 4096.0);
+   set_hal_pin("conf0.r", 9.6);//typenschild
+   set_hal_pin("conf0.l", 0.0133);//gemessen
+   set_hal_pin("conf0.j", KGCM2(0.26));//typenschild
+   set_hal_pin("conf0.psi", 0.35 / 2.0 / M_PI);//typenschild
+
+   set_hal_pin("conf0.pos_p", 150.0);
+   set_hal_pin("conf0.acc_p", 0.2);
+   set_hal_pin("conf0.acc_pi", 100.0);
+   set_hal_pin("conf0.cur_p", 0.5);
+   set_hal_pin("conf0.cur_i", 0.001);
+   set_hal_pin("conf0.cur_ff", 1.0);
+   set_hal_pin("conf0.cur_ind", 0.9);
+   set_hal_pin("conf0.autophase", 0.0);
+   set_hal_pin("conf0.fb_offset", 1.324);
+   set_fb_res();
+}
+
 void set_sanyo_r2(){ // TODO
    set_hal_pin("conf0.polecount", 5.0);
    set_hal_pin("conf0.max_vel", RPM(6000));

@@ -65,11 +65,11 @@ int main(void)
    setup();
 
    //#include "comps/adc.comp"
-   #include "comps/encs.comp"
+   //#include "comps/encs.comp"
 
    #include "comps/fault.comp"
    #include "comps/enc_cmd.comp"
-   //#include "comps/enc_fb.comp"
+   #include "comps/enc_fb.comp"
    //#include "comps/enc_fb_org.comp"
 
    //#include "comps/en.comp"
@@ -182,7 +182,8 @@ int main(void)
    //set_bergerlahr();
    //set_mitsubishi();
    //set_festo();
-   set_sanyo_r2();
+   set_fanuc10s();
+   //set_sanyo_r2();
    //set_rexroth();
    //set_sanyo();
    //set_bosch1();
