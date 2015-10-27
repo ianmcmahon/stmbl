@@ -29,9 +29,11 @@ void set_manutec();
 void set_bergerlahr();
 void set_sankyo();
 void set_sanyo();
+void set_sanyo_r2();
 void set_mitsubishi();
 void set_br();
 void set_e240();
+void set_kollmorgen();
 
 void set_cmd_enc();
 void set_cmd_const();
