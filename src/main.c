@@ -68,9 +68,10 @@ int main(void)
    //#include "comps/encs.comp"
 
    #include "comps/fault.comp"
-   #include "comps/enc_cmd.comp"
+   //#include "comps/enc_cmd.comp"
    #include "comps/enc_fb.comp"
    //#include "comps/enc_fb_org.comp"
+   #include "comps/sserial.comp"
 
    //#include "comps/en.comp"
    //#include "comps/res.comp"
