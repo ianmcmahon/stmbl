@@ -110,7 +110,7 @@ void add_pd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, ui
 	memory.ptoc.pd[i].param_max = param_max;
 	memory.ptoc.pd[i].data_add = *param_addr;
 	strcpy(memory.ptoc.pd[i].names, unit_string);
-	strcat(memory.ptoc.pd[i].names, name_string);
+	strcpy(memory.ptoc.pd[i].names + strlen(unit_string) + 1, name_string);
 
 	memory.ptocp[i] = MEMPTR(memory.ptoc.pd[i]);
 
@@ -197,6 +197,12 @@ int main(void) {
 		printf("\tparmmin:  0x%08x\n", MEMU32(pd_ptr)); pd_ptr += 4;
 		printf("\tparmmax:  0x%08x\n", MEMU32(pd_ptr)); pd_ptr += 4;
 		printf("\tdataaddr: 0x%04x\n", MEMU16(pd_ptr)); pd_ptr += 2;
+		char *unitstr = (char *)(memory.bytes + pd_ptr);
+		printf("\tunitstr:  %s\n", unitstr);
+		pd_ptr += strlen(unitstr) + 1;
+		char *namestr = (char *)(memory.bytes + pd_ptr);
+		printf("\tnamestr:  %s\n", namestr);
+		pd_ptr += strlen(namestr) + 1;
 
 		ptocp += 2;
 	} 
