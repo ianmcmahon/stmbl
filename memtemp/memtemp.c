@@ -130,11 +130,55 @@ void add_pd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, ui
 	*param_addr += num_bytes;
 }
 
+void add_gpd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, uint8_t data_type, uint8_t data_dir, 
+			uint32_t param_min, uint32_t param_max, char *unit_string, char *name_string) {
+
+	uint8_t i = *pd_num;
+
+	printf("gpd record %d\n", i);
+	printf("value is stored at %04x\n", *param_addr);
+
+	memory.gtoc.pd[i].record_type = RECORD_TYPE_PROCESS_DATA_RECORD;
+	memory.gtoc.pd[i].data_size = data_size_in_bits;
+	memory.gtoc.pd[i].data_type = data_type;
+	memory.gtoc.pd[i].data_direction = data_dir;
+	memory.gtoc.pd[i].param_min = param_min;
+	memory.gtoc.pd[i].param_max = param_max;
+	memory.gtoc.pd[i].data_add = *param_addr;
+	strcpy(memory.gtoc.pd[i].names, unit_string);
+	strcpy(memory.gtoc.pd[i].names + strlen(unit_string) + 1, name_string);
+
+	memory.gtocp[i] = MEMPTR(memory.gtoc.pd[i]);
+
+	*pd_num += 1;
+
+	// increment the param address based on the size of the data in bits
+	uint8_t num_bytes = data_size_in_bits / 8 + (data_size_in_bits % 8 > 0 ? 1 : 0);
+
+	*param_addr += num_bytes;
+}
+
+void add_mode(uint8_t *mode_num, uint8_t index, uint8_t type, char *name_string) {
+	uint8_t i = *mode_num;
+
+	printf("mode record %d\n", i);
+
+	memory.gtoc.md[i].record_type = MODE_DATA_RECORD;
+	memory.gtoc.md[i].index = index;
+	memory.gtoc.md[i].type = type;
+	memory.gtoc.md[i].unused = 0x00;
+	strcpy(memory.gtoc.md[i].name_string, name_string);
+
+	*mode_num += 1;
+}
+
+
+
 int main(void) {
 	printf("in main\n");
 
 	uint16_t param_addr = MEMPTR(memory.pd_values);
-	uint8_t pd_num = 0;
+	uint8_t pd_num = 0, gpd_num = 0, mode_num = 0;
 
 	// we increment these in add_pd
 	discovery_rpc.input = 1; // 1 because the fault byte will always be present.
@@ -143,33 +187,16 @@ int main(void) {
 	add_pd(&pd_num, &param_addr, 16, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "rps", "cmd_vel");
 	add_pd(&pd_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_INPUT, 0, 0, "rps", "fb_vel");
 
+	add_gpd(&gpd_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "non", "swr");
+
+	add_mode(&mode_num, 0, 0, "foo");
+	add_mode(&mode_num, 1, 1, "io_");
+
 	memory.ptoc.eot = 0x0000;
 	memory.gtoc.eot = 0x0000;
 
-	memory.ptocp[NO_PD] = 0x0000;
-	memory.gtocp[NO_GPD+NO_MODES] = 0x0000; 
-
-	memory.gtoc.md[0].record_type = MODE_DATA_RECORD;
-	memory.gtoc.md[0].index = 0x00;
-	memory.gtoc.md[0].type = 0x00;
-	memory.gtoc.md[0].unused = 0x00;
-	strncpy(memory.gtoc.md[0].name_string,"foo",4);
-
-	memory.gtoc.md[1].record_type = MODE_DATA_RECORD;
-	memory.gtoc.md[1].index = 0x00;
-	memory.gtoc.md[1].type = 0x01;
-	memory.gtoc.md[1].unused = 0x00;
-	strncpy(memory.gtoc.md[1].name_string,"io_",4);
-
-	memory.gtoc.pd[0].record_type = RECORD_TYPE_PROCESS_DATA_RECORD;
-	memory.gtoc.pd[0].data_size = 0x10;
-	memory.gtoc.pd[0].data_type = 0x02;
-	memory.gtoc.pd[0].data_direction = 0x80;
-	memory.gtoc.pd[0].param_min = 0.0;
-	memory.gtoc.pd[0].param_max = 0.0;
-	memory.gtoc.pd[0].data_add = 0x095c;
-	strcpy(memory.gtoc.pd[0].names,"non");
-	strcat(memory.gtoc.pd[0].names,"swr");
+	memory.ptocp[pd_num] = 0x0000;
+	memory.gtocp[gpd_num + mode_num] = 0x0000; 
 
 	discovery_rpc.ptocp = MEMPTR(memory.ptocp);
 	discovery_rpc.gtocp = MEMPTR(memory.gtocp);
