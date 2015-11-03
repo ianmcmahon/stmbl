@@ -19,7 +19,7 @@
 #define DATA_DIRECTION_OUTPUT 0x80
 
 //modes
-#define MODE_DATA_RECORD 0xB0
+#define RECORD_TYPE_MODE_DATA_RECORD 0xB0
 
 #define NO_MODES 2//gtoc modes
 #define NO_GPD 1//gtoc process data
@@ -130,7 +130,10 @@ void add_pd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, ui
 	*param_addr += num_bytes;
 }
 
-void add_gpd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, uint8_t data_type, uint8_t data_dir, 
+
+// gtoc_idx is the index of the gpd or mode within the gtoc.  We can add gpds and modes in any order, and the gtoc will read them back
+// in that order.   It's passed by value because the functions don't modify it.  It's passed in as the sum of the current gpd_num and mode_num.
+void add_gpd(uint8_t *pd_num, uint8_t gtoc_idx, uint16_t *param_addr, uint8_t data_size_in_bits, uint8_t data_type, uint8_t data_dir, 
 			uint32_t param_min, uint32_t param_max, char *unit_string, char *name_string) {
 
 	uint8_t i = *pd_num;
@@ -148,7 +151,7 @@ void add_gpd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, u
 	strcpy(memory.gtoc.pd[i].names, unit_string);
 	strcpy(memory.gtoc.pd[i].names + strlen(unit_string) + 1, name_string);
 
-	memory.gtocp[i] = MEMPTR(memory.gtoc.pd[i]);
+	memory.gtocp[gtoc_idx] = MEMPTR(memory.gtoc.pd[i]);
 
 	*pd_num += 1;
 
@@ -158,16 +161,18 @@ void add_gpd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, u
 	*param_addr += num_bytes;
 }
 
-void add_mode(uint8_t *mode_num, uint8_t index, uint8_t type, char *name_string) {
+void add_mode(uint8_t *mode_num, uint8_t gtoc_idx, uint8_t index, uint8_t type, char *name_string) {
 	uint8_t i = *mode_num;
 
 	printf("mode record %d\n", i);
 
-	memory.gtoc.md[i].record_type = MODE_DATA_RECORD;
+	memory.gtoc.md[i].record_type = RECORD_TYPE_MODE_DATA_RECORD;
 	memory.gtoc.md[i].index = index;
 	memory.gtoc.md[i].type = type;
 	memory.gtoc.md[i].unused = 0x00;
 	strcpy(memory.gtoc.md[i].name_string, name_string);
+
+	memory.gtocp[gtoc_idx] = MEMPTR(memory.gtoc.md[i]);
 
 	*mode_num += 1;
 }
@@ -187,16 +192,17 @@ int main(void) {
 	add_pd(&pd_num, &param_addr, 16, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "rps", "cmd_vel");
 	add_pd(&pd_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_INPUT, 0, 0, "rps", "fb_vel");
 
-	add_gpd(&gpd_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "non", "swr");
+	add_gpd(&gpd_num, gpd_num + mode_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "non", "swr");
 
-	add_mode(&mode_num, 0, 0, "foo");
-	add_mode(&mode_num, 1, 1, "io_");
+	add_mode(&mode_num, gpd_num + mode_num, 0, 0, "foo");
+	add_mode(&mode_num, gpd_num + mode_num, 1, 1, "io_");
 
 	memory.ptoc.eot = 0x0000;
 	memory.gtoc.eot = 0x0000;
 
 	memory.ptocp[pd_num] = 0x0000;
 	memory.gtocp[gpd_num + mode_num] = 0x0000; 
+
 
 	discovery_rpc.ptocp = MEMPTR(memory.ptocp);
 	discovery_rpc.gtocp = MEMPTR(memory.gtocp);
@@ -233,6 +239,43 @@ int main(void) {
 
 		ptocp += 2;
 	} 
+
+	printf("\ngtoc: (at 0x%04x)\n", discovery_rpc.gtocp);
+	uint16_t gtocp = discovery_rpc.gtocp;
+
+	while(MEMU16(gtocp) != 0x0000) {
+		pd_ptr = MEMU16(gtocp);
+		printf("pd ptr: 0x%04x\n", pd_ptr);
+
+		uint8_t rectype = MEMU8(pd_ptr++);
+		printf("\trectype:  0x%02x\n", rectype);
+		switch(rectype) {
+			case RECORD_TYPE_PROCESS_DATA_RECORD:
+				printf("\tdatasize: 0x%02x\n", MEMU8(pd_ptr++));
+				printf("\tdatatype: 0x%02x\n", MEMU8(pd_ptr++));
+				printf("\tdatadir:  0x%02x\n", MEMU8(pd_ptr++));
+				printf("\tparmmin:  0x%08x\n", MEMU32(pd_ptr)); pd_ptr += 4;
+				printf("\tparmmax:  0x%08x\n", MEMU32(pd_ptr)); pd_ptr += 4;
+				printf("\tdataaddr: 0x%04x\n", MEMU16(pd_ptr)); pd_ptr += 2;
+				char *unitstr = (char *)(memory.bytes + pd_ptr);
+				printf("\tunitstr:  %s\n", unitstr);
+				pd_ptr += strlen(unitstr) + 1;
+				char *namestr = (char *)(memory.bytes + pd_ptr);
+				printf("\tnamestr:  %s\n", namestr);
+				pd_ptr += strlen(namestr) + 1;
+				break;
+			case RECORD_TYPE_MODE_DATA_RECORD:
+				printf("\tindex:    0x%02x\n", pd_ptr++);
+				printf("\ttype:     0x%02x\n", pd_ptr++);
+				pd_ptr++; // skip 'unused' byte
+				namestr = (char *)(memory.bytes + pd_ptr);
+				printf("\tnamestr:  %s\n", namestr);
+				pd_ptr += strlen(namestr);
+				break;
+		}
+
+		gtocp += 2;
+	}
 
 	exit(0);
 }
