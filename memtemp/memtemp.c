@@ -23,8 +23,10 @@
 
 #define NO_MODES 2//gtoc modes
 #define NO_GPD 1//gtoc process data
-#define NO_PD 2//process data
+#define NO_PD 3//process data
 
+#define IS_INPUT(pdr) (pdr.data_direction != 0x80)
+#define IS_OUTPUT(pdr) (pdr.data_direction != 0x00)
 
 #define MAX_PD_STRLEN 32 // this is the max space for both the unit and name strings in the PD descriptors
 #define MAX_PD_VAL_BYTES 64 // this should be >= the sum of the data sizes of all pd vars
@@ -119,11 +121,11 @@ void add_pd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, ui
 	// increment the param address based on the size of the data in bits
 	uint8_t num_bytes = data_size_in_bits / 8 + (data_size_in_bits % 8 > 0 ? 1 : 0);
 
-	if (data_dir != 0x00) {
+	if (IS_INPUT(memory.ptoc.pd[i])) {
 		discovery_rpc.input += num_bytes;
 	}
 
-	if (data_dir != 0x80) {
+	if (IS_OUTPUT(memory.ptoc.pd[i])) {
 		discovery_rpc.output += num_bytes;
 	}
 
@@ -177,7 +179,22 @@ void add_mode(uint8_t *mode_num, uint8_t gtoc_idx, uint8_t index, uint8_t type, 
 	*mode_num += 1;
 }
 
+void process_data_rpc(uint8_t *input, uint8_t *output) {
+	uint8_t pd_cnt = NO_PD;
 
+	printf("in pdrpc; ptoc contains %d entries\n", pd_cnt);
+
+	*(input++) = 0xA5; // fault byte, just for easy recognition
+
+	for(uint8_t i = 0; i < pd_cnt; i++) {
+		if (IS_INPUT(memory.ptoc.pd[i])) {
+			*(input++) = MEMU8(memory.ptoc.pd[i].data_add);
+		}
+		if (IS_OUTPUT(memory.ptoc.pd[i])) {
+			MEMU8(memory.ptoc.pd[i].data_add) = *(output++);
+		}
+	}
+}
 
 int main(void) {
 	printf("in main\n");
@@ -189,8 +206,9 @@ int main(void) {
 	discovery_rpc.input = 1; // 1 because the fault byte will always be present.
 	discovery_rpc.output = 0;
 
-	add_pd(&pd_num, &param_addr, 16, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "rps", "cmd_vel");
+	add_pd(&pd_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "rps", "cmd_vel");
 	add_pd(&pd_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_INPUT, 0, 0, "rps", "fb_vel");
+	add_pd(&pd_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_BI_DIRECTIONAL, 0, 0, "none", "bidir");
 
 	add_gpd(&gpd_num, gpd_num + mode_num, &param_addr, 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "non", "swr");
 
@@ -276,6 +294,41 @@ int main(void) {
 
 		gtocp += 2;
 	}
+
+	// now I'm going to create a couple pointers to values in the pdval space, these will represent our pins
+	// I can change those vals, and then do a mock pd_rpc to set all the outputs and send all the inputs
+
+	uint8_t *cmd_vel = &(memory.bytes[memory.ptoc.pd[0].data_add]);
+	uint8_t *fb_vel = &(memory.bytes[memory.ptoc.pd[1].data_add]);
+	uint8_t *bidir = &(memory.bytes[memory.ptoc.pd[2].data_add]);
+
+	uint8_t output_buf[discovery_rpc.output];
+	uint8_t input_buf[discovery_rpc.input];
+
+	printf("initial vals: cmd_vel 0x%02x   fb_vel 0x%02x   bidir 0x%02x\n", *cmd_vel, *fb_vel, *bidir);
+
+	output_buf[0] = 0x10;
+	output_buf[1] = 0x20;
+	printf("incoming output bytes: "); for (uint8_t i = 0; i < discovery_rpc.output; i++) { printf("0x%02x ", output_buf[i]); } printf("\n");
+	process_data_rpc(input_buf, output_buf);
+	printf("outgoing input bytes: "); for (uint8_t i = 0; i < discovery_rpc.input; i++) { printf("0x%02x ", input_buf[i]); } printf("\n");
+
+	printf("updated vals: cmd_vel 0x%02x   fb_vel 0x%02x   bidir 0x%02x\n", *cmd_vel, *fb_vel, *bidir);
+
+	printf("setting fb and bidir\n");
+	*fb_vel = 0xCA;
+	*bidir  = 0xFE;
+
+	output_buf[0] = 0x30;
+	output_buf[1] = 0x40;
+
+	printf("updated vals: cmd_vel 0x%02x   fb_vel 0x%02x   bidir 0x%02x\n", *cmd_vel, *fb_vel, *bidir);
+
+	printf("incoming output bytes: "); for (uint8_t i = 0; i < discovery_rpc.output; i++) { printf("0x%02x ", output_buf[i]); } printf("\n");
+	process_data_rpc(input_buf, output_buf);
+	printf("outgoing input bytes: "); for (uint8_t i = 0; i < discovery_rpc.input; i++) { printf("0x%02x ", input_buf[i]); } printf("\n");
+
+	printf("updated vals: cmd_vel 0x%02x   fb_vel 0x%02x   bidir 0x%02x\n", *cmd_vel, *fb_vel, *bidir);
 
 	exit(0);
 }
