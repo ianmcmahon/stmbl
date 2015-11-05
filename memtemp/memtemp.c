@@ -232,10 +232,9 @@ void process_data_rpc(uint8_t *input, uint8_t *output) {
 				val_bits_remaining -= bits_to_unpack;
 				data_size -= bits_to_unpack;
 				output_bit_ptr += bits_to_unpack;
-				if(output_bit_ptr >= 8) {
-					output_bit_ptr %= 8;
-					output++;
-				}
+			
+				if((output_bit_ptr %= 8) == 0) output++;
+
 				if(val_bits_remaining == 0 || data_size == 0) {
 					MEMU8(data_addr++) = val;
 					printf("adding 0x%02x to data\n", val);
