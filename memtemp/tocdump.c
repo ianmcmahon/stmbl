@@ -10,9 +10,6 @@
 #define MEMU16(m, ptr) (m[ptr] | m[ptr+1]<<8)
 #define MEMU32(m, ptr) (m[ptr] | m[ptr+1]<<8 | m[ptr+2]<<16 | m[ptr+3]<<24)
 
-#define GTOCP 0xa584
-#define PTOCP 0xa53e
-
 void print_tocs(uint8_t *m, uint16_t ptocp, uint16_t gtocp) {
 	uint16_t pd_ptr;
 
@@ -80,7 +77,7 @@ int main(void) {
 	uint8_t *buffer;
 	long filelen;
 
-	fileptr = fopen("mem.hex", "rb");	// open in binary read mode
+	fileptr = fopen("test.hex", "rb");	// open in binary read mode
 	fseek(fileptr, 0, SEEK_END); 		// jump to the end of the file
 	filelen = ftell(fileptr);			// get the byte offset of the end of the file
 	rewind(fileptr);					// jump back to the beginning to start reading
@@ -91,5 +88,8 @@ int main(void) {
 
 	printf("read mem.hex\n\n");
 
-	print_tocs(buffer, PTOCP, GTOCP);
+	// MY memory dumps have the discovery_rpc struct at the beginning, so byte 0 and 1 are input and output byte counts, bytes 2/3 and 4/5 are the ptocp and gtocp.
+	uint16_t ptocp = buffer[2] | buffer[3]<<8;
+	uint16_t gtocp = buffer[4] | buffer[5]<<8;
+	print_tocs(buffer, ptocp, gtocp);
 }

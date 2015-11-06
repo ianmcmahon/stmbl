@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MEM_SIZE 1024
+
 //process data
 #define RECORD_TYPE_PROCESS_DATA_RECORD 0xA0
 #define DATA_TYPE_PAD 0x00
@@ -25,8 +27,8 @@
 #define NO_GPD 1//gtoc process data
 #define NO_PD 4//process data
 
-#define IS_INPUT(pdr) (pdr.data_direction != 0x80)
-#define IS_OUTPUT(pdr) (pdr.data_direction != 0x00)
+#define IS_INPUT(pdr) (pdr->data_direction != 0x80)
+#define IS_OUTPUT(pdr) (pdr->data_direction != 0x00)
 
 #define MAX_PD_STRLEN 32 // this is the max space for both the unit and name strings in the PD descriptors
 #define MAX_PD_VAL_BYTES 64 // this should be >= the sum of the data sizes of all pd vars
@@ -37,6 +39,7 @@
 #define MEMU16(ptr) (memory.bytes[ptr] | memory.bytes[ptr+1]<<8)
 #define MEMU32(ptr) (memory.bytes[ptr] | memory.bytes[ptr+1]<<8 | memory.bytes[ptr+2]<<16 | memory.bytes[ptr+3]<<24)
 
+#define NUM_BYTES(bits) (bits / 8 + (bits % 8 > 0 ? 1 : 0))
 
 
 typedef struct{
@@ -46,8 +49,8 @@ typedef struct{
    uint8_t data_direction;
    float param_min;
    float param_max;
-   uint16_t data_add;
-   char names[MAX_PD_STRLEN];
+   uint16_t data_addr;
+   char names; // we can pick up the address of that member for a memory location to write strings to.
 } process_data_descriptor_t;
 
 typedef struct{
@@ -55,8 +58,10 @@ typedef struct{
    uint8_t index;
    uint8_t type;
    uint8_t unused;
-   char name_string[4];
+   char names;
 } mode_descriptor_t;
+
+
 
 typedef struct{
 	uint8_t input; // these are in BITS now.  I'll convert to bytes when I respond to the rpc.
@@ -64,6 +69,7 @@ typedef struct{
    uint16_t ptocp;//pointer to process data table
    uint16_t gtocp;//pointer to mode data table
 } discovery_rpc_t;
+
 
 typedef struct{
 	mode_descriptor_t md[NO_MODES];
@@ -79,106 +85,45 @@ typedef struct{
 
 typedef union {
 	struct {
-		uint8_t start;
-		// the tocs are terminated by 0x0000 entries, hence the +1
-		uint16_t ptocp[NO_PD+1];
-		uint16_t gtocp[NO_GPD+NO_MODES+1];
-		ptoc_t ptoc;
-		gtoc_t gtoc;
-		uint8_t pd_values[MAX_PD_VAL_BYTES];
-		uint8_t end;
+		discovery_rpc_t discovery;
+		uint8_t heap[MEM_SIZE - sizeof(discovery_rpc_t)];
 	};
-	uint8_t bytes[1024];
+
+	uint8_t bytes[MEM_SIZE];
 } memory_t;
 
 
 static memory_t memory;
-static discovery_rpc_t discovery_rpc;
+static uint8_t *heap_ptr;
 
+process_data_descriptor_t create_pdr(uint8_t data_size_in_bits, uint8_t data_type, uint8_t data_dir, float param_min, float param_max) {
+	process_data_descriptor_t pd;
 
-void add_pd(uint8_t *pd_num, uint16_t *param_addr, uint8_t data_size_in_bits, uint8_t data_type, uint8_t data_dir, 
-			uint32_t param_min, uint32_t param_max, char *unit_string, char *name_string) {
+	pd.record_type 		= RECORD_TYPE_PROCESS_DATA_RECORD;
+	pd.data_size 		= data_size_in_bits;
+	pd.data_type 		= data_type;
+	pd.data_direction 	= data_dir;
+	pd.param_min 		= param_min;
+	pd.param_max 		= param_max;
+//	strcpy(pd.names, unit_string);
+//	strcpy(pd.names + strlen(unit_string) + 1, name_string);
 
-	uint8_t i = *pd_num;
-
-	printf("pd record %d\n", i);
-	printf("value is stored at %04x\n", *param_addr);
-
-	memory.ptoc.pd[i].record_type = RECORD_TYPE_PROCESS_DATA_RECORD;
-	memory.ptoc.pd[i].data_size = data_size_in_bits;
-	memory.ptoc.pd[i].data_type = data_type;
-	memory.ptoc.pd[i].data_direction = data_dir;
-	memory.ptoc.pd[i].param_min = param_min;
-	memory.ptoc.pd[i].param_max = param_max;
-	memory.ptoc.pd[i].data_add = *param_addr;
-	strcpy(memory.ptoc.pd[i].names, unit_string);
-	strcpy(memory.ptoc.pd[i].names + strlen(unit_string) + 1, name_string);
-
-	memory.ptocp[i] = MEMPTR(memory.ptoc.pd[i]);
-
-	*pd_num += 1;
-
-	// increment the param address based on the size of the data in bits
-	uint8_t num_bytes = data_size_in_bits / 8 + (data_size_in_bits % 8 > 0 ? 1 : 0);
-
-	if (IS_INPUT(memory.ptoc.pd[i])) {
-		discovery_rpc.input += data_size_in_bits;
-	}
-
-	if (IS_OUTPUT(memory.ptoc.pd[i])) {
-		discovery_rpc.output += data_size_in_bits;
-	}
-
-	*param_addr += num_bytes;
+	return pd;
 }
 
+mode_descriptor_t create_mdr(uint8_t index, uint8_t type) {
+	mode_descriptor_t md;
 
-// gtoc_idx is the index of the gpd or mode within the gtoc.  We can add gpds and modes in any order, and the gtoc will read them back
-// in that order.   It's passed by value because the functions don't modify it.  It's passed in as the sum of the current gpd_num and mode_num.
-void add_gpd(uint8_t *pd_num, uint8_t gtoc_idx, uint16_t *param_addr, uint8_t data_size_in_bits, uint8_t data_type, uint8_t data_dir, 
-			uint32_t param_min, uint32_t param_max, char *unit_string, char *name_string) {
+	md.record_type = RECORD_TYPE_MODE_DATA_RECORD;
+	md.index = index;
+	md.type = type;
+	md.unused = 0x00;
+	//strcpy(md.name_string, name_string);
 
-	uint8_t i = *pd_num;
-
-	printf("gpd record %d\n", i);
-	printf("value is stored at %04x\n", *param_addr);
-
-	memory.gtoc.pd[i].record_type = RECORD_TYPE_PROCESS_DATA_RECORD;
-	memory.gtoc.pd[i].data_size = data_size_in_bits;
-	memory.gtoc.pd[i].data_type = data_type;
-	memory.gtoc.pd[i].data_direction = data_dir;
-	memory.gtoc.pd[i].param_min = param_min;
-	memory.gtoc.pd[i].param_max = param_max;
-	memory.gtoc.pd[i].data_add = *param_addr;
-	strcpy(memory.gtoc.pd[i].names, unit_string);
-	strcpy(memory.gtoc.pd[i].names + strlen(unit_string) + 1, name_string);
-
-	memory.gtocp[gtoc_idx] = MEMPTR(memory.gtoc.pd[i]);
-
-	*pd_num += 1;
-
-	// increment the param address based on the size of the data in bits
-	uint8_t num_bytes = data_size_in_bits / 8 + (data_size_in_bits % 8 > 0 ? 1 : 0);
-
-	*param_addr += num_bytes;
+	return md;
 }
 
-void add_mode(uint8_t *mode_num, uint8_t gtoc_idx, uint8_t index, uint8_t type, char *name_string) {
-	uint8_t i = *mode_num;
-
-	printf("mode record %d\n", i);
-
-	memory.gtoc.md[i].record_type = RECORD_TYPE_MODE_DATA_RECORD;
-	memory.gtoc.md[i].index = index;
-	memory.gtoc.md[i].type = type;
-	memory.gtoc.md[i].unused = 0x00;
-	strcpy(memory.gtoc.md[i].name_string, name_string);
-
-	memory.gtocp[gtoc_idx] = MEMPTR(memory.gtoc.md[i]);
-
-	*mode_num += 1;
-}
-
+/*
 #define BITSLEFT(ptr) (8-ptr)
 
 void process_data_rpc(uint8_t *input, uint8_t *output) {
@@ -246,9 +191,151 @@ void process_data_rpc(uint8_t *input, uint8_t *output) {
 	}
 }
 
-int main(void) {
-	printf("in main\n");
+*/
 
+void dump_memory_range(uint16_t start, uint16_t end) {
+	start -= (start % 16);
+	end -= ((end+1) % 16);
+	printf("dump memory from 0x%04x to 0x%04x\n\n", start, end);
+
+	printf("    ");
+	for(int i = 0; i < 16; i++) {
+		printf(" %x ", i);
+	}
+
+	printf("\n---------------------------------------------------\n");
+
+	for(int j = start >> 4; j <= end >> 4; j++) {
+		printf("%03x ", j);
+		for (int i = 0; i < 16; i++) {
+			uint16_t addr = (j<<4) | i;
+			printf("%02x ", memory.bytes[addr]);
+		}
+		printf("\n");
+	}
+	printf("\n");
+}
+
+void dump_memory() {
+	dump_memory_range(0, MEM_SIZE);
+}
+
+void write_memory_to_file() {
+	FILE *fileptr;
+	uint8_t *buffer;
+	long filelen;
+
+	fileptr = fopen("test.hex", "wb");	
+
+	fwrite(memory.bytes, sizeof(uint8_t), MEM_SIZE, fileptr);
+	fclose(fileptr);
+	printf("Wrote memory out to test.hex\n");
+}
+
+uint16_t add_pd(char *name_string, char *unit_string, uint8_t data_size_in_bits, uint8_t data_type, uint8_t data_dir, float param_min, float param_max) {
+	process_data_descriptor_t pdr = create_pdr(data_size_in_bits, data_type, data_dir, param_min, param_max);
+
+	pdr.data_addr = MEMPTR(*heap_ptr);
+	heap_ptr += NUM_BYTES(data_size_in_bits);
+
+	memcpy(heap_ptr, &pdr, sizeof(process_data_descriptor_t));
+	// note that we don't store the names in the struct anymore.  The fixed-length struct is copied into memory, and then the nmaes go in directly behind it, so they'll read out properly
+	dump_memory_range(0, 0x40);
+
+	uint16_t pd_ptr = MEMPTR(*heap_ptr); // save off the ptr to return, before we modify the heap ptr
+
+	heap_ptr = (uint8_t *)&(((process_data_descriptor_t *)heap_ptr)->names);
+
+	// copy the strings in after the pd
+	strcpy((char *)heap_ptr, unit_string);
+	heap_ptr += strlen(unit_string)+1;
+	dump_memory_range(0, 0x40);
+	strcpy((char *)heap_ptr, name_string);
+	heap_ptr += strlen(name_string)+1;
+	dump_memory_range(0, 0x40);
+
+	return pd_ptr;
+}
+
+uint16_t add_mode(char *name_string, uint8_t index, uint8_t type) {
+	mode_descriptor_t mdr = create_mdr(index, type);
+
+	memcpy(heap_ptr, &mdr, sizeof(mode_descriptor_t));
+
+	uint16_t md_ptr = MEMPTR(*heap_ptr);
+
+	heap_ptr = (uint8_t *)&(((mode_descriptor_t *)heap_ptr)->names);
+
+	strcpy((char *)heap_ptr, name_string);
+	heap_ptr += strlen(name_string)+1;
+
+	return md_ptr;
+}
+
+
+
+#define INDIRECT_PD(pd_ptr) ((process_data_descriptor_t *)(memory.bytes + *pd_ptr))
+#define DATA_DIR(pd_ptr) INDIRECT_PD(pd_ptr)->data_direction
+#define DATA_SIZE(pd_ptr) INDIRECT_PD(pd_ptr)->data_size
+
+#define ADD_PROCESS_VAR(args) *ptocp = add_pd args; input_bits += IS_INPUT(INDIRECT_PD(ptocp)) ? DATA_SIZE(ptocp) : 0; output_bits += IS_OUTPUT(INDIRECT_PD(ptocp)) ? DATA_SIZE(ptocp) : 0; ptocp++
+#define ADD_GLOBAL_VAR(args) *gtocp++ = add_pd args
+#define ADD_MODE(args) *gtocp++ = add_mode args
+
+
+int main(void) {
+
+	heap_ptr = memory.heap;
+
+	uint16_t input_bits = 8; // this starts at 8 bits = 1 byte for the fault byte
+	uint16_t output_bits = 0;
+
+	// these are temp toc arrays that the macros will write pointers into.  the tocs get copied to main memory after everything else is written in
+	uint16_t ptoc[32];
+	uint16_t gtoc[32]; 
+
+	uint16_t *ptocp = ptoc; uint16_t *gtocp = gtoc;
+
+	printf("sizeof pdr: %ld\n", sizeof(process_data_descriptor_t));
+
+
+	ADD_PROCESS_VAR(("output_pins", "none", 4, DATA_TYPE_BITS, DATA_DIRECTION_OUTPUT, 1.1, 2.2));
+	ADD_PROCESS_VAR(("cmd_vel", "rps", 12, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0));
+	ADD_PROCESS_VAR(("fb_vel", "rps", 12, DATA_TYPE_UNSIGNED, DATA_DIRECTION_INPUT, 0, 0));
+
+	ADD_GLOBAL_VAR(("swr", "non", 8, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0));
+
+	ADD_MODE(("foo", 0, 0));
+	ADD_MODE(("io_", 1, 1));
+
+	// todo: automatically create padding pds based on the mod remainder of input/output bits
+
+	// now that all the toc entries have been added, write out the tocs to memory and set up the toc pointers
+
+	memory.discovery.input = input_bits >> 3;
+	memory.discovery.output = output_bits >> 3;
+
+	memory.discovery.ptocp = MEMPTR(*heap_ptr);
+
+	for(uint8_t i = 0; i < ptocp - ptoc; i++) {
+		*heap_ptr++ = ptoc[i] & 0x00FF; 
+		*heap_ptr++ = (ptoc[i] & 0xFF00) >> 8;
+	}
+	*heap_ptr++ = 0x00; *heap_ptr++ = 0x00; // this is the ptoc end marker
+
+	memory.discovery.gtocp = MEMPTR(*heap_ptr);
+
+	for(uint8_t i = 0; i < gtocp - gtoc; i++) {
+		*heap_ptr++ = gtoc[i] & 0x00FF; 
+		*heap_ptr++ = (gtoc[i] & 0xFF00) >> 8;
+	}
+	*heap_ptr++ = 0x00; *heap_ptr++ = 0x00; // this is the gtoc end marker
+
+	dump_memory_range(0, 0x100);
+
+	write_memory_to_file();
+
+/*
 	uint16_t param_addr = MEMPTR(memory.pd_values);
 	uint8_t pd_num = 0, gpd_num = 0, mode_num = 0;
 
@@ -256,7 +343,6 @@ int main(void) {
 	discovery_rpc.input = 8; // 8 bits because the fault byte will always be present.
 	discovery_rpc.output = 0;
 
-	add_pd(&pd_num, &param_addr, 4, DATA_TYPE_BITS, DATA_DIRECTION_OUTPUT, 0, 0, "none", "output_pins");
 	add_pd(&pd_num, &param_addr, 4, DATA_TYPE_BITS, DATA_DIRECTION_INPUT, 0, 0, "none", "input_pins");
 	add_pd(&pd_num, &param_addr, 12, DATA_TYPE_UNSIGNED, DATA_DIRECTION_OUTPUT, 0, 0, "rps", "cmd_vel");
 	add_pd(&pd_num, &param_addr, 12, DATA_TYPE_UNSIGNED, DATA_DIRECTION_INPUT, 0, 0, "rps", "fb_vel");
@@ -277,7 +363,12 @@ int main(void) {
 	discovery_rpc.gtocp = MEMPTR(memory.gtocp);
 
 	printf("memory created\n\n");
+*/
 
+
+
+
+/*
 	printf("discovery_rpc:\n");
 	printf("input bytes: %d.  output bytes: %d\n", discovery_rpc.input>>3, discovery_rpc.output>>3);
 	printf("gtocp: 0x%04x  ptocp: 0x%04x\n", discovery_rpc.gtocp, discovery_rpc.ptocp);
@@ -362,6 +453,7 @@ int main(void) {
 
 
 	printf("value in the pd[2] data pointer: 0x%04x\n", MEMU16(memory.ptoc.pd[2].data_add));
+*/
 
 
 /*
