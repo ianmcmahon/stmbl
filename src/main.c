@@ -75,7 +75,7 @@ int main(void)
    setup();
 
    #include "comps/sserial.comp"
-   //#include "comps/adc.comp"
+   #include "comps/adc.comp"
    #include "comps/encs.comp"
 
    #include "comps/fault.comp"
